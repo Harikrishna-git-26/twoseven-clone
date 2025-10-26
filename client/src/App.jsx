@@ -8,7 +8,7 @@ const SIGNALING_SERVER = import.meta.env.VITE_SIGNALING_SERVER || "http://localh
 export default function App() {
   const [name, setName] = useState("");
   const [nameSet, setNameSet] = useState(false);
-  const [socketId, setSocketId] = useState(""); // short 5-char ID
+  const [socketId, setSocketId] = useState("");
   const [peers, setPeers] = useState([]);
   const [peerStreams, setPeerStreams] = useState({});
   const [msg, setMsg] = useState("");
@@ -24,12 +24,12 @@ export default function App() {
   const playerRef = useRef(null);
   const peersRef = useRef({});
 
-  // --- Init Socket ---
+  // --- Initialize Socket ---
   useEffect(() => {
     const socket = io(SIGNALING_SERVER);
     socketRef.current = socket;
 
-    socket.on("connect-success", ({ id }) => setSocketId(id)); // short 5-char ID
+    socket.on("connect-success", ({ id }) => setSocketId(id.substring(0,5))); // 5-char ID
     socket.on("update-peers", setPeers);
     socket.on("peer-updated", (p) => {
       setPeers(prev => prev.map(peer => peer.id === p.id ? { ...peer, ...p } : peer));
@@ -42,7 +42,7 @@ export default function App() {
         return rest;
       });
     });
-    socket.on("receive-message", ({ from, name: fromName, msg }) => {
+    socket.on("receive-message", ({ from, fromName, msg }) => {
       setChat(prev => [...prev, { from, fromName, msg }]);
     });
     socket.on("receive-video", ({ url, action, time }) => {
@@ -66,14 +66,14 @@ export default function App() {
       peersRef.current[from]?.signal(signal);
     });
 
-    return () => { 
-      socket.disconnect(); 
-      Object.values(peersRef.current).forEach(p => p.destroy()); 
-      peersRef.current = {}; 
+    return () => {
+      socket.disconnect();
+      Object.values(peersRef.current).forEach(p => p.destroy());
+      peersRef.current = {};
     };
   }, [mediaStream]);
 
-  // --- Auto create peers ---
+  // --- Auto-create peers ---
   useEffect(() => {
     if (!socketId) return;
     peers.filter(p => p.id !== socketId).forEach(p => {
@@ -88,59 +88,73 @@ export default function App() {
   }, [peers, socketId, name, mediaStream]);
 
   const handleNameEnter = e => { if (e.key === "Enter" && name.trim()) setNameSet(true); };
-  const connectToFriend = () => { if (targetId.trim()) socketRef.current.emit("connect-peer", targetId); setTargetId(""); };
-  const sendMessage = () => { 
-    if (!msg.trim()) return; 
-    peers.forEach(p => socketRef.current.emit("send-message", { to: p.id, msg, name: nameSet ? name : "" })); 
-    setChat(prev => [...prev, { from: socketId, fromName: "You", msg }]); 
-    setMsg(""); 
+  const connectToFriend = () => { if (targetId.trim()) socketRef.current.emit("connect-peer", targetId.substring(0,5)); setTargetId(""); };
+  const sendMessage = () => {
+    if (!msg.trim()) return;
+    peers.forEach(p => socketRef.current.emit("send-message", { to: p.id, msg, name: nameSet ? name : "" }));
+    setChat(prev => [...prev, { from: socketId, fromName: "You", msg }]);
+    setMsg("");
   };
-  const shareVideo = () => { 
-    if (videoUrl.trim()) { 
-      peers.forEach(p => socketRef.current.emit("send-video", { to: p.id, url: videoUrl })); 
-      setSharedVideoUrl(videoUrl); 
-      setVideoUrl(""); 
-    } 
+  const shareVideo = () => {
+    if (videoUrl.trim()) {
+      peers.forEach(p => socketRef.current.emit("send-video", { to: p.id, url: videoUrl }));
+      setSharedVideoUrl(videoUrl);
+      setVideoUrl("");
+    }
   };
-  const broadcastAction = action => { 
-    const t = playerRef.current.getCurrentTime(); 
-    peers.forEach(p => socketRef.current.emit("send-video", { to: p.id, action, time: t })); 
+  const broadcastAction = action => {
+    const t = playerRef.current.getCurrentTime();
+    peers.forEach(p => socketRef.current.emit("send-video", { to: p.id, action, time: t }));
   };
-  
+
+  // --- Toggle Camera ---
   const toggleCam = async () => {
-    if (meStatus.camOn) { 
-      mediaStream?.getVideoTracks().forEach(track => track.stop()); 
-      setMeStatus(s => ({ ...s, camOn: false })); 
-      socketRef.current.emit("update-status", { camOn: false, micOn: meStatus.micOn }); 
-    } else { 
-      const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: meStatus.micOn }); 
-      setMediaStream(s); 
-      if (myVideoRef.current) myVideoRef.current.srcObject = s; 
-      setMeStatus(s => ({ ...s, camOn: true })); 
-      socketRef.current.emit("update-status", { camOn: true, micOn: meStatus.micOn }); 
+    if (meStatus.camOn) {
+      mediaStream?.getVideoTracks().forEach(track => track.stop());
+      const newStream = new MediaStream(mediaStream?.getAudioTracks() || []);
+      setMediaStream(newStream);
+      if (myVideoRef.current) myVideoRef.current.srcObject = null;
+      setMeStatus(s => ({ ...s, camOn: false }));
+      socketRef.current.emit("update-status", { camOn: false, micOn: meStatus.micOn });
+    } else {
+      const videoStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      const tracks = [...(mediaStream?.getAudioTracks() || []), ...videoStream.getVideoTracks()];
+      const newStream = new MediaStream(tracks);
+      setMediaStream(newStream);
+      if (myVideoRef.current) myVideoRef.current.srcObject = newStream;
+      setMeStatus(s => ({ ...s, camOn: true }));
+      socketRef.current.emit("update-status", { camOn: true, micOn: meStatus.micOn });
     }
   };
+
+  // --- Toggle Microphone ---
   const toggleMic = async () => {
-    if (meStatus.micOn) { 
-      mediaStream?.getAudioTracks().forEach(track => track.stop()); 
-      setMeStatus(s => ({ ...s, micOn: false })); 
-      socketRef.current.emit("update-status", { camOn: meStatus.camOn, micOn: false }); 
-    } else { 
-      const s = await navigator.mediaDevices.getUserMedia({ video: meStatus.camOn, audio: true }); 
-      setMediaStream(s); 
-      if (myVideoRef.current) myVideoRef.current.srcObject = s; 
-      setMeStatus(s => ({ ...s, micOn: true })); 
-      socketRef.current.emit("update-status", { camOn: meStatus.camOn, micOn: true }); 
+    if (meStatus.micOn) {
+      mediaStream?.getAudioTracks().forEach(track => track.stop());
+      const newStream = new MediaStream(mediaStream?.getVideoTracks() || []);
+      setMediaStream(newStream);
+      if (myVideoRef.current && meStatus.camOn) myVideoRef.current.srcObject = newStream;
+      setMeStatus(s => ({ ...s, micOn: false }));
+      socketRef.current.emit("update-status", { camOn: meStatus.camOn, micOn: false });
+    } else {
+      const audioStream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
+      const tracks = [...(mediaStream?.getVideoTracks() || []), ...audioStream.getAudioTracks()];
+      const newStream = new MediaStream(tracks);
+      setMediaStream(newStream);
+      if (myVideoRef.current && meStatus.camOn) myVideoRef.current.srcObject = newStream;
+      setMeStatus(s => ({ ...s, micOn: true }));
+      socketRef.current.emit("update-status", { camOn: meStatus.camOn, micOn: true });
     }
   };
+
   const leave = () => { socketRef.current.emit("leave"); window.location.reload(); };
 
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "#090d14", color: "#eee" }}>
       <div style={{ padding: 10, background: "#121826", display: "flex", justifyContent: "space-between" }}>
         <div style={{ fontWeight: 700, fontSize: 28 }}>WatchApp</div>
-        {nameSet 
-          ? <span>{name} ({socketId})</span> 
+        {nameSet
+          ? <span>{name} ({socketId})</span>
           : <input placeholder="Enter name" value={name} onChange={e => setName(e.target.value)} onKeyDown={handleNameEnter} />}
       </div>
       <div style={{ display: "flex", flex: 1 }}>
@@ -150,29 +164,29 @@ export default function App() {
             <button onClick={shareVideo}>Share</button>
           </div>
           <div style={{ flex: 1, position: "relative" }}>
-            {sharedVideoUrl ? 
-              <ReactPlayer 
-                url={sharedVideoUrl} 
-                ref={playerRef} 
-                controls 
-                width="100%" 
-                height="100%" 
-                playing 
-                onPlay={() => broadcastAction("PLAY")} 
-                onPause={() => broadcastAction("PAUSE")} 
-                onSeek={(t) => broadcastAction("SEEK")} 
-              /> 
+            {sharedVideoUrl
+              ? <ReactPlayer
+                  url={sharedVideoUrl}
+                  ref={playerRef}
+                  controls
+                  width="100%"
+                  height="100%"
+                  playing
+                  onPlay={() => broadcastAction("PLAY")}
+                  onPause={() => broadcastAction("PAUSE")}
+                  onSeek={(t) => broadcastAction("SEEK", t)}
+                />
               : <span>No video shared yet</span>}
           </div>
         </div>
         <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 12, padding: 12 }}>
           <div>
-            <input placeholder="Target ID" value={targetId} onChange={e => setTargetId(e.target.value)} maxLength={5} />
+            <input placeholder="Target ID" value={targetId} onChange={e => setTargetId(e.target.value)} />
             <button onClick={connectToFriend}>Connect</button>
           </div>
           <div style={{ flex: 1, overflowY: "auto" }}>
             <div>
-              <span>{nameSet ? name : "You"} ({socketId})</span>
+              <span>{nameSet ? name : "You"}</span>
               <video ref={myVideoRef} autoPlay muted playsInline style={{ display: meStatus.camOn && mediaStream ? "block" : "none" }} />
               <button onClick={toggleCam}>{meStatus.camOn ? "Cam On" : "Cam Off"}</button>
               <button onClick={toggleMic}>{meStatus.micOn ? "Mic On" : "Mic Off"}</button>
@@ -180,8 +194,8 @@ export default function App() {
             </div>
             {peers.filter(p => p.id !== socketId).map(p =>
               <div key={p.id}>
-                <span>{p.name} ({p.id})</span>
-                <video autoPlay playsInline muted={!p.micOn} ref={el => { if(el && peerStreams[p.id] && el.srcObject!==peerStreams[p.id]) el.srcObject = peerStreams[p.id]; }} />
+                <span>{p.name}</span>
+                <video autoPlay playsInline muted={!p.micOn} ref={el => { if (el && peerStreams[p.id] && el.srcObject !== peerStreams[p.id]) el.srcObject = peerStreams[p.id]; }} />
                 <span>{p.camOn ? "Cam On" : "Cam Off"}</span>
                 <span>{p.micOn ? "Mic On" : "Mic Off"}</span>
               </div>
