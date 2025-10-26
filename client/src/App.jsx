@@ -3,8 +3,6 @@ import io from "socket.io-client";
 import Peer from "simple-peer";
 import ReactPlayer from "react-player";
 
-const SIGNALING_SERVER = import.meta.env.VITE_SIGNALING_SERVER || "http://localhost:5000";
-
 export default function App() {
   const [name,setName] = useState("");
   const [nameSet,setNameSet] = useState(false);
