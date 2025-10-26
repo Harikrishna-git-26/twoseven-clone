@@ -3,7 +3,7 @@ import io from "socket.io-client";
 import Peer from "simple-peer";
 import ReactPlayer from "react-player";
 
-const SIGNALING_SERVER = import.meta.env.VITE_SIGNALING_SERVER || "/api";
+const SIGNALING_SERVER = import.meta.env.VITE_SIGNALING_SERVER || "http://localhost:5000";
 
 export default function App() {
   const [name, setName] = useState("");
@@ -27,7 +27,7 @@ export default function App() {
 
   // --- Initialize Socket ---
   useEffect(() => {
-    const socket = io(SIGNALING_SERVER);
+    const socket = io(SIGNALING_SERVER, { transports: ["websocket"] });;
     socketRef.current = socket;
 
     socket.on("connect-success", ({ id }) => setSocketId(id));
